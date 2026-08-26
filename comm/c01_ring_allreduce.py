@@ -25,6 +25,7 @@
 运行: torchrun --nproc_per_node=4 comm/c01_ring_allreduce.py
 自测参考实现: 加 --solution
 """
+import chunk
 import os
 import torch
 import torch.distributed as dist
@@ -33,9 +34,37 @@ HINT = "run: torchrun --nproc_per_node=4 comm/c01_ring_allreduce.py"
 
 
 def my_ring_allreduce(t: torch.Tensor, group=None) -> torch.Tensor:
-    """in-place ring all-reduce(SUM)，返回 t。"""
-    # TODO
-    raise NotImplementedError
+    # """in-place ring all-reduce(SUM)，返回 t。"""
+    # # TODO
+    # raise NotImplementedError
+    worldsize = dist.get_world_size(group)
+    rank_id = dist.get_rank(group)
+    chunks = list(t.tensor_split(worldsize))
+
+    for step in range(worldsize - 1):
+        send_idx = (rank_id - step - 1 + worldsize) % worldsize
+        recv_idx = (rank_id - step + worldsize - 2) % worldsize
+        recv_buf = torch.empty_like(chunks[recv_idx])
+        ops = dist.batch_isend_irecv([
+            dist.P2POp(dist.isend, chunks[send_idx], (rank_id + 1) % worldsize, group=group),
+            dist.P2POp(dist.irecv, recv_buf, (rank_id - 1 + worldsize) % worldsize, group=group),
+        ])
+        for op in ops:
+            op.wait()
+        chunks[recv_idx].add_(recv_buf)
+    for step in range(worldsize - 1):
+        send_idx = (rank_id - step + worldsize) % worldsize
+        recv_idx = (rank_id - step + worldsize - 1) % worldsize
+        recv_buf = torch.empty_like(chunks[recv_idx])
+        ops = dist.batch_isend_irecv([
+            dist.P2POp(dist.isend, chunks[send_idx], (rank_id + 1) % worldsize, group=group),
+            dist.P2POp(dist.irecv, recv_buf, (rank_id - 1 + worldsize) % worldsize, group=group),
+        ])
+        for op in ops:
+            op.wait()
+        chunks[recv_idx].copy_(recv_buf)
+    return t
+
 
 
 def ring_allreduce(t, group=None):

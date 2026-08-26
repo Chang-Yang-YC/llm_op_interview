@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ring All-Reduce 两阶段可视化（n=4）</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: #eef2f7; color: #0f2a4a; padding: 28px 14px 60px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; }
+header h1 { font-size: 26px; letter-spacing: .5px; }
+header .sub { color: #64748b; margin-top: 6px; font-size: 14px; }
+header .sub b { color: #0f2a4a; }
+
+.cards3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 18px 0; }
+.mini { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.65; color: #334155; box-shadow: 0 1px 3px rgba(15,42,74,.05); }
+.mini h3 { font-size: 13.5px; margin-bottom: 6px; color: #0f2a4a; display: flex; align-items: center; gap: 8px; }
+.badge { font-size: 11px; font-weight: 700; color: #fff; border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+.b1 { background: #2563eb; } .b2 { background: #16a34a; } .b3 { background: #7c3aed; }
+
+.stage { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px; box-shadow: 0 1px 3px rgba(15,42,74,.05); }
+.controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+.controls button {
+  border: 1px solid #cbd5e1; background: #f8fafc; color: #0f2a4a; border-radius: 8px;
+  padding: 7px 14px; font-size: 13px; cursor: pointer; font-weight: 600; transition: all .15s;
+}
+.controls button:hover { background: #e2e8f0; }
+.controls button:disabled { opacity: .4; cursor: default; }
+#btnPlay.playing { background: #16a34a; border-color: #16a34a; color: #fff; }
+.dots { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; }
+.dot { border: none; background: none; font-size: 11px; color: #94a3b8; cursor: pointer; padding: 4px 7px; border-radius: 6px; font-weight: 600; }
+.dot.cur { background: #0f2a4a; color: #fff; }
+.dot.done { color: #16a34a; }
+
+.ring-row { display: flex; align-items: stretch; }
+.rank { flex: 1; min-width: 0; background: #fbfdff; border: 1px solid #dbe4ee; border-radius: 12px; padding: 10px; }
+.rhead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; padding: 0 2px; }
+.rhead b { font-size: 14.5px; }
+.rhead span { font-size: 10.5px; color: #94a3b8; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.cell { position: relative; border-radius: 8px; border: 1.5px solid; min-height: 54px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+.ci { position: absolute; left: 6px; top: 4px; font-size: 10px; font-style: normal; opacity: .5; font-weight: 800; }
+.c0 { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+.c1 { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+.c2 { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+.c3 { background: #fdf4ff; border-color: #e9d5ff; color: #6b21a8; }
+.cell.dim { opacity: .3; }
+.cell.sigma { background: #16324f; border-color: #facc15; color: #fff; }
+.cell.sigma .ci { opacity: .75; }
+.cell.send::after { content: ''; position: absolute; left: 5px; right: 5px; top: 4px; height: 3px; border-radius: 2px; background: #d97706; }
+.cell.recv::before { content: ''; position: absolute; left: 5px; right: 5px; bottom: 4px; height: 3px; border-radius: 2px; background: #dc2626; }
+.mk { position: absolute; font-style: normal; font-size: 10px; font-weight: 700; color: #fff; padding: 1px 6px; border-radius: 999px; z-index: 2; }
+.mk-s { right: 4px; top: -7px; background: #d97706; }
+.mk-r { left: 4px; bottom: -7px; background: #dc2626; }
+@keyframes flash { 0% { box-shadow: 0 0 0 7px rgba(250,204,21,.5); } 100% { box-shadow: 0 0 0 0 rgba(250,204,21,0); } }
+.cell.flash { animation: flash 1.1s ease-out; }
+
+.arrow { width: 40px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 26px; color: #cbd5e1; font-weight: 700; user-select: none; transition: color .25s; }
+.arrow.on { color: #16a34a; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { transform: scale(1.25); } }
+
+.loop { position: relative; height: 64px; margin: 6px 30px 0; }
+.loop-line { position: absolute; left: 14%; right: 14%; top: 0; height: 36px; border: 2.5px solid #cbd5e1; border-top: none; border-radius: 0 0 26px 26px; transition: border-color .25s; }
+.loop-line::before { content: ''; position: absolute; left: -7px; top: -6px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid #cbd5e1; transition: border-bottom-color .25s; }
+.loop.on .loop-line { border-color: #16a34a; }
+.loop.on .loop-line::before { border-bottom-color: #16a34a; }
+.loop-tag { position: absolute; left: 50%; top: 44px; transform: translateX(-50%); font-size: 12px; color: #94a3b8; white-space: nowrap; }
+.loop.on .loop-tag { color: #16a34a; font-weight: 700; }
+
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 16px 2px 0; font-size: 12px; color: #475569; align-items: center; }
+.lg { display: inline-flex; align-items: center; gap: 5px; }
+.sw { width: 14px; height: 14px; border-radius: 4px; display: inline-block; border: 1px solid rgba(0,0,0,.12); }
+
+.stepinfo { margin-top: 14px; border: 1px dashed #cbd5e1; border-radius: 12px; padding: 14px 16px; background: #f8fafc; }
+.si-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.si-step { font-size: 12.5px; color: #64748b; font-weight: 600; }
+.si-formula { font-size: 13px; color: #334155; margin-bottom: 10px; line-height: 1.9; }
+.si-formula code { background: #e8edf5; border-radius: 5px; padding: 1px 7px; font-size: 12.5px; color: #0f2a4a; }
+.si-actions { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 5px 18px; font-size: 12.5px; color: #334155; }
+.si-actions li { line-height: 1.7; border-left: 3px solid #dbe4ee; padding-left: 8px; border-radius: 2px; }
+.si-actions b { color: #0f2a4a; }
+.si-note { margin-top: 10px; font-size: 12.5px; color: #92400e; background: #fefce8; border: 1px solid #fde68a; border-radius: 8px; padding: 8px 12px; line-height: 1.7; }
+
+.notes { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.note { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; font-size: 13px; line-height: 1.8; color: #334155; }
+.note.wide { grid-column: 1 / -1; }
+.note h3 { font-size: 14px; color: #0f2a4a; margin-bottom: 8px; }
+.note code { background: #eef2f7; border-radius: 4px; padding: 0 5px; font-size: 12px; color: #0f2a4a; }
+.note table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 8px 0; }
+.note th, .note td { border: 1px solid #e2e8f0; padding: 5px 8px; text-align: left; }
+.note th { background: #f1f5f9; }
+.note ul { padding-left: 18px; }
+.note li { margin: 4px 0; }
+
+@media (max-width: 900px) {
+  .cards3 { grid-template-columns: 1fr; }
+  .ring-row { flex-wrap: wrap; gap: 8px; }
+  .arrow { display: none; }
+  .loop { display: none; }
+  .rank { flex: 1 1 44%; }
+  .si-actions { grid-template-columns: 1fr; }
+  .notes { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Ring All-Reduce · 两阶段可视化</h1>
+    <p class="sub">n = 4 个 rank 排成环，数据切成 n 块（A / B / C / D，块 0~3） · 共 <b>2(n−1) = 6 步</b> · 每步每卡只发送 <b>data / n</b> · 方向恒为 r → (r+1) % n</p>
+  </header>
+
+  <section class="cards3">
+    <div class="mini">
+      <h3><span class="badge b1">Phase 1</span> Reduce-Scatter（前 n−1 步）</h3>
+      <p>每步把自己负责的一块发给右邻居，同时把左邻居发来的同名块<b>原地累加</b>（add_）。结束时 rank r 恰好持有<b>完全归约的块 r</b>，各管一摊。</p>
+    </div>
+    <div class="mini">
+      <h3><span class="badge b2">Phase 2</span> All-Gather（后 n−1 步）</h3>
+      <p>把已归约好的 Σ 块沿环<b>转发</b>（不累加、copy_ 直接覆盖）。n−1 步后每个 Σ 块绕环一周，所有卡集齐全部结果。</p>
+    </div>
+    <div class="mini">
+      <h3><span class="badge b3">带宽</span> 必背公式</h3>
+      <p>每卡总发送量 = <b>2(n−1)/n · data ≈ 2·data</b>，与卡数 n 无关（带宽最优）。busbw = data · 2(n−1)/n / time。</p>
+    </div>
+  </section>
+
+  <section class="stage">
+    <div class="controls">
+      <button id="btnPrev">← 上一步</button>
+      <button id="btnPlay">▶ 自动播放</button>
+      <button id="btnNext">下一步 →</button>
+      <button id="btnReset">⟲ 重置</button>
+      <div class="dots" id="dots"></div>
+    </div>
+    <div class="ring-row" id="ringRow"></div>
+    <div class="loop" id="loop">
+      <div class="loop-line"></div>
+      <span class="loop-tag">R3 → R0（回到起点，构成环）</span>
+    </div>
+    <div class="legend">
+      <span class="lg"><span class="sw" style="background:#eff6ff;border-color:#bfdbfe"></span>块 A(0)</span>
+      <span class="lg"><span class="sw" style="background:#ecfdf5;border-color:#a7f3d0"></span>块 B(1)</span>
+      <span class="lg"><span class="sw" style="background:#fff7ed;border-color:#fed7aa"></span>块 C(2)</span>
+      <span class="lg"><span class="sw" style="background:#fdf4ff;border-color:#e9d5ff"></span>块 D(3)</span>
+      <span class="lg"><span class="sw" style="background:#16324f;border-color:#facc15"></span>Σ = 已完全归约</span>
+      <span class="lg"><span class="sw" style="background:#d97706"></span>顶部金条 = 本步发送</span>
+      <span class="lg"><span class="sw" style="background:#dc2626"></span>底部红条 = 本步接收</span>
+      <span class="lg">灰色淡化 = Phase 2 中已废弃的中间结果</span>
+    </div>
+    <div class="stepinfo" id="stepinfo"></div>
+  </section>
+
+  <section class="notes">
+    <div class="note wide">
+      <h3>接力棒直觉 —— 索引公式为什么长这样</h3>
+      <p>把块 j 的部分和想象成一支<b>接力棒</b>：从 rank (j+1)%n 起跑，每传一站就累加该站 rank 的本地分量，n−1 步后绕环一圈回到主人 rank j 手里，恰好加满 n 份。以块 A（j=0, n=4）为例：</p>
+      <p style="margin:6px 0"><code>R1 起跑(A₁) → R2 (+A₂) → R3 (+A₃) → 回到 R0 (+A₀) = ΣA</code></p>
+      <p>第 s 步持有并发出块 j 接力棒的正是 rank <code>(j+1+s) % n</code>；把 j 反解出来就是代码里的 <code>send_idx = (r−s−1) % n</code>。发送块与接收块<b>恰好错开一位</b>还有工程原因：isend 的张量在 wait() 完成前不能被改写，所以发送块和接收累加块必须是不同的块。Phase 2 同理，只是接力棒换成了"已经算完的 Σ 块"，从主人自己手里起跑，因此索引整体偏移 1 位（<code>send_idx = (r−s) % n</code>）。</p>
+    </div>
+    <div class="note">
+      <h3>带宽账 —— 为什么 ring 是带宽最优的</h3>
+      <table>
+        <tr><th>方案</th><th>每卡传输量</th><th>随 n 增长</th></tr>
+        <tr><td>Naive：先 all-gather 全量，再本地求和</td><td>(n−1)·data</td><td>线性恶化</td></tr>
+        <tr><td>Ring：reduce-scatter + all-gather</td><td><b>2(n−1)/n · data</b></td><td>≈ 2·data，恒定</td></tr>
+      </table>
+      <ul>
+        <li>每步每卡只发 data/n，共 2(n−1) 步；n→∞ 时每个字节约"被发 2 次"：一次为了归约，一次为了广播。</li>
+        <li>任何时刻所有 n 条相邻链路都在同时传数据，没有热卡，链路利用率恒定。</li>
+        <li>代价是延迟：串行 2(n−1) 步，随 n 线性 → 小消息用 tree，大消息用 ring（NCCL 的选择逻辑）。</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h3>对应代码（comm/c01_ring_allreduce.py）</h3>
+      <ul>
+        <li><b>Phase 1</b>（ring_allreduce 内 "phase 1: reduce-scatter" 段）：recv_buf 与发送块分开分配；<code>chunks[recv_idx].add_(recv_buf)</code> 原地累加。</li>
+        <li><b>Phase 2</b>（"phase 2: all-gather" 段）：<code>chunks[recv_idx].copy_(recv_buf)</code> 必须写回张量视图保持 in-place——只重绑定列表元素不会写回原张量（常见 bug）。</li>
+        <li>索引注释：若误用 <code>(r−step)/(r−step−1)</code>，归约块的归属会错位成块 (r+1)%n，Phase 2 会转发未归约的数据。</li>
+        <li>坑：逐条 isend/irecv 会懒创建 2-rank 通信子，ring 首发顺序构成循环依赖 → 死锁；正确姿势是 <code>dist.batch_isend_irecv + P2POp</code>。</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script>
+const N = 4;
+const BL = ['A', 'B', 'C', 'D']; // 块字母
+const S = (l, dim) => ({ l, dim: !!dim });
+
+// 7 个状态：初始 + 3 步 reduce-scatter + 3 步 all-gather（最后一步即完成态）
+// sends[r] / recvs[r]: 该步 rank r 发送 / 接收的块编号
+const states = [
+  { phase: 'init', chunks: [
+      [S('A₀'), S('B₀'), S('C₀'), S('D₀')],
+      [S('A₁'), S('B₁'), S('C₁'), S('D₁')],
+      [S('A₂'), S('B₂'), S('C₂'), S('D₂')],
+      [S('A₃'), S('B₃'), S('C₃'), S('D₃')]] },
+  { phase: 'rs', step: 0, sends: [3, 0, 1, 2], recvs: [2, 3, 0, 1], chunks: [
+      [S('A₀'), S('B₀'), S('C₀+C₃'), S('D₀')],
+      [S('A₁'), S('B₁'), S('C₁'), S('D₀+D₁')],
+      [S('A₁+A₂'), S('B₂'), S('C₂'), S('D₂')],
+      [S('A₃'), S('B₂+B₃'), S('C₃'), S('D₃')]] },
+  { phase: 'rs', step: 1, sends: [2, 3, 0, 1], recvs: [1, 2, 3, 0], chunks: [
+      [S('A₀'), S('B₀+B₂+B₃'), S('C₀+C₃'), S('D₀')],
+      [S('A₁'), S('B₁'), S('C₀+C₁+C₃'), S('D₀+D₁')],
+      [S('A₁+A₂'), S('B₂'), S('C₂'), S('D₀+D₁+D₂')],
+      [S('A₁+A₂+A₃'), S('B₂+B₃'), S('C₃'), S('D₃')]] },
+  { phase: 'rs', step: 2, sends: [1, 2, 3, 0], recvs: [0, 1, 2, 3], chunks: [
+      [S('ΣA'), S('B₀+B₂+B₃'), S('C₀+C₃'), S('D₀')],
+      [S('A₁'), S('ΣB'), S('C₀+C₁+C₃'), S('D₀+D₁')],
+      [S('A₁+A₂'), S('B₂'), S('ΣC'), S('D₀+D₁+D₂')],
+      [S('A₁+A₂+A₃'), S('B₂+B₃'), S('C₃'), S('ΣD')]] },
+  { phase: 'ag', step: 0, sends: [0, 1, 2, 3], recvs: [3, 0, 1, 2], chunks: [
+      [S('ΣA'), S('B₀+B₂+B₃', 1), S('C₀+C₃', 1), S('ΣD')],
+      [S('ΣA'), S('ΣB'), S('C₀+C₁+C₃', 1), S('D₀+D₁', 1)],
+      [S('A₁+A₂', 1), S('ΣB'), S('ΣC'), S('D₀+D₁+D₂', 1)],
+      [S('A₁+A₂+A₃', 1), S('B₂+B₃', 1), S('ΣC'), S('ΣD')]] },
+  { phase: 'ag', step: 1, sends: [3, 0, 1, 2], recvs: [2, 3, 0, 1], chunks: [
+      [S('ΣA'), S('B₀+B₂+B₃', 1), S('ΣC'), S('ΣD')],
+      [S('ΣA'), S('ΣB'), S('C₀+C₁+C₃', 1), S('ΣD')],
+      [S('ΣA'), S('ΣB'), S('ΣC'), S('D₀+D₁+D₂', 1)],
+      [S('A₁+A₂+A₃', 1), S('ΣB'), S('ΣC'), S('ΣD')]] },
+  { phase: 'ag', step: 2, done: true, sends: [2, 3, 0, 1], recvs: [1, 2, 3, 0], chunks: [
+      [S('ΣA'), S('ΣB'), S('ΣC'), S('ΣD')],
+      [S('ΣA'), S('ΣB'), S('ΣC'), S('ΣD')],
+      [S('ΣA'), S('ΣB'), S('ΣC'), S('ΣD')],
+      [S('ΣA'), S('ΣB'), S('ΣC'), S('ΣD')]] },
+];
+
+const DOT_LABELS = ['初始', 'RS 1', 'RS 2', 'RS 3', 'AG 1', 'AG 2', '完成'];
+let cur = 0, timer = null;
+const $ = id => document.getElementById(id);
+
+function phaseBadge(st) {
+  if (st.phase === 'init') return '<span class="badge b3">初始状态</span>';
+  if (st.phase === 'rs') return '<span class="badge b1">Phase 1 · Reduce-Scatter</span>';
+  return '<span class="badge b2">Phase 2 · All-Gather</span>';
+}
+
+function cellHTML(r, c, st, i) {
+  const v = st.chunks[r][c];
+  const cls = ['cell', 'c' + c];
+  if (v.dim) cls.push('dim');
+  if (v.l.startsWith('Σ')) cls.push('sigma');
+  const isS = st.sends && st.sends[r] === c;
+  const isR = st.recvs && st.recvs[r] === c;
+  if (isS) cls.push('send');
+  if (isR) cls.push('recv');
+  if (i > 0 && states[i - 1].chunks[r][c].l !== v.l) cls.push('flash');
+  let mk = '';
+  if (isS) mk += '<i class="mk mk-s">发</i>';
+  if (isR) mk += '<i class="mk mk-r">收</i>';
+  return `<div class="${cls.join(' ')}" title="块${c}（${BL[c]}）"><em class="ci">${BL[c]}</em><span>${v.l}</span>${mk}</div>`;
+}
+
+function rankHTML(r, st, i) {
+  const cells = [0, 1, 2, 3].map(c => cellHTML(r, c, st, i)).join('');
+  return `<div class="rank">
+    <div class="rhead"><b>Rank ${r}</b><span>左邻 R${(r + N - 1) % N} · 右邻 R${(r + 1) % N}</span></div>
+    <div class="grid">${cells}</div>
+  </div>`;
+}
+
+function infoHTML(st, i) {
+  if (st.phase === 'init') {
+    return `<div class="si-head">${phaseBadge(st)}</div>
+      <div class="si-formula">每个 rank 持有完整数据的一份本地副本（下标 = rank 编号，如 A₁ 是 rank 1 上的块 A），切成 n = 4 块。<br>
+      目标：所有 rank 最终都拿到 <b>ΣA / ΣB / ΣC / ΣD（全部 4 份副本之和）</b>，与 <code>dist.all_reduce(SUM)</code> 对齐。点击「下一步」或「自动播放」开始。</div>`;
+  }
+  const s = st.step, isRS = st.phase === 'rs';
+  const formula = isRS
+    ? `<code>send_idx = (r − ${s} − 1) % 4</code> → 发给右邻居 <code>(r+1)%4</code>；　<code>recv_idx = (r − ${s} − 2) % 4</code> → 收左邻居数据，<b>add_ 原地累加</b>`
+    : `<code>send_idx = (r − ${s}) % 4</code> → 发给右邻居 <code>(r+1)%4</code>；　<code>recv_idx = (r − ${s} − 1) % 4</code> → 收左邻居数据，<b>copy_ 直接覆盖</b>`;
+  const prev = states[i - 1], acts = [];
+  for (let r = 0; r < N; r++) {
+    const si = st.sends[r], ri = st.recvs[r], left = (r + N - 1) % N;
+    const op = isRS ? '累加' : '覆盖';
+    acts.push(`<li><b>R${r}</b>：块${BL[si]}(${prev.chunks[r][si].l}) → R${(r + 1) % N}　｜　块${BL[ri]} ← R${left} 的 ${prev.chunks[left][ri].l}，${op}后 ⇒ <b>${st.chunks[r][ri].l}</b></li>`);
+  }
+  let note = '';
+  if (isRS && s === N - 2) note = '★ Reduce-Scatter 完成：rank r 恰好持有完全归约的块 r（R0→ΣA、R1→ΣB、R2→ΣC、R3→ΣD），各管一摊。中间结果已完成使命，Phase 2 中将被淡化。';
+  if (!isRS && st.done) note = '★ 完成！每个 Σ 块都绕环一周，所有 rank 均持有 [ΣA, ΣB, ΣC, ΣD]，与 dist.all_reduce(SUM) 结果一致。共 2(n−1) = 6 步，每卡每步只发送 data/4。';
+  const g = isRS ? s + 1 : N - 1 + s + 1;
+  const stepText = `第 ${s + 1}/${N - 1} 步（全局 ${g}/${2 * (N - 1)}）`;
+  return `<div class="si-head">${phaseBadge(st)}<span class="si-step">${stepText}</span></div>
+    <div class="si-formula">${formula}</div>
+    <ul class="si-actions">${acts.join('')}</ul>
+    ${note ? `<div class="si-note">${note}</div>` : ''}`;
+}
+
+function render(i) {
+  cur = i;
+  const st = states[i];
+  let html = '';
+  for (let r = 0; r < N; r++) {
+    html += rankHTML(r, st, i);
+    if (r < N - 1) html += `<div class="arrow${st.sends ? ' on' : ''}">➜</div>`;
+  }
+  $('ringRow').innerHTML = html;
+  $('loop').className = 'loop' + (st.sends ? ' on' : '');
+  $('stepinfo').innerHTML = infoHTML(st, i);
+  $('dots').innerHTML = DOT_LABELS.map((t, k) =>
+    `<button class="dot${k === i ? ' cur' : (k < i ? ' done' : '')}" data-k="${k}">${t}</button>`).join('');
+  $('btnPrev').disabled = i === 0;
+  $('btnNext').disabled = i === states.length - 1;
+}
+
+function stopPlay() {
+  if (timer) {
+    clearInterval(timer); timer = null;
+    $('btnPlay').textContent = '▶ 自动播放';
+    $('btnPlay').classList.remove('playing');
+  }
+}
+
+function togglePlay() {
+  if (timer) { stopPlay(); return; }
+  $('btnPlay').textContent = '⏸ 暂停';
+  $('btnPlay').classList.add('playing');
+  timer = setInterval(() => {
+    if (cur >= states.length - 1) { stopPlay(); return; }
+    render(cur + 1);
+  }, 1700);
+}
+
+$('btnPrev').onclick = () => { stopPlay(); if (cur > 0) render(cur - 1); };
+$('btnNext').onclick = () => { stopPlay(); if (cur < states.length - 1) render(cur + 1); };
+$('btnReset').onclick = () => { stopPlay(); render(0); };
+$('btnPlay').onclick = togglePlay;
+$('dots').onclick = e => {
+  const k = e.target.dataset && e.target.dataset.k;
+  if (k !== undefined) { stopPlay(); render(+k); }
+};
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') { stopPlay(); if (cur < states.length - 1) render(cur + 1); }
+  if (e.key === 'ArrowLeft') { stopPlay(); if (cur > 0) render(cur - 1); }
+});
+
+render(0);
+</script>
+</body>
+</html>
